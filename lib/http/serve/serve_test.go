@@ -2,9 +2,12 @@ package serve
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -13,6 +16,38 @@ import (
 	"github.com/rclone/rclone/fstest/mockobject"
 	"github.com/stretchr/testify/assert"
 )
+
+// openErrorObject is an fs.Object whose Open always fails with err
+type openErrorObject struct {
+	mockobject.Object
+	err error
+}
+
+func (o openErrorObject) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
+	return nil, o.err
+}
+
+func TestObjectOpenError(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"ObjectNotFound", fs.ErrorObjectNotFound, http.StatusNotFound},
+		{"WrappedObjectNotFound", fmt.Errorf("wrapped: %w", fs.ErrorObjectNotFound), http.StatusNotFound},
+		{"NotExist", os.ErrNotExist, http.StatusNotFound},
+		{"Other", errors.New("503 service unavailable"), http.StatusInternalServerError},
+		{"PermissionDenied", fs.ErrorPermissionDenied, http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest("GET", "http://example.com/aFile", nil)
+			o := openErrorObject{Object: mockobject.New("aFile"), err: test.err}
+			Object(w, r, o)
+			assert.Equal(t, test.want, w.Result().StatusCode)
+		})
+	}
+}
 
 func TestObjectBadMethod(t *testing.T) {
 	w := httptest.NewRecorder()

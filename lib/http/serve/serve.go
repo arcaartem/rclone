@@ -2,9 +2,11 @@
 package serve
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 
@@ -96,7 +98,11 @@ func Object(w http.ResponseWriter, r *http.Request, o fs.Object) {
 	file, err := o.Open(r.Context(), options...)
 	if err != nil {
 		fs.Debugf(o, "Get request open error: %v", err)
-		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		if errors.Is(err, fs.ErrorObjectNotFound) || errors.Is(err, os.ErrNotExist) {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
+		} else {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		}
 		return
 	}
 	tr := accounting.Stats(r.Context()).NewTransfer(o, nil)
